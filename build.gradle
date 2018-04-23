@@ -1,0 +1,83 @@
+import de.itemis.mps.gradle.* 
+apply plugin: 'java'
+apply plugin: 'maven-publish'
+apply plugin: 'base'
+
+
+ext.mpsVersion = '2017.3.5'
+
+
+//##################DIRECTORIES########################
+ext.artifactsDir = new File(rootDir, 'artifacts')
+ext.mpsDir = new File(artifactsDir, 'mps')
+//#####################################################
+
+sourceSets.main.compileClasspath += fileTree("artifacts/mps/lib")
+
+// einfach nur eine list mit URLs in der potentiel artefakte liegen 
+ext.dependencyRepositories = [
+        'https://projects.itemis.de/nexus/content/repositories/mbeddr',
+        'https://projects.itemis.de/nexus/content/repositories/mbeddr_snapshots'
+]
+
+configurations {
+    mps
+}
+
+// kopiert sich alle artefakte von mps in den mspDir folder
+task resolveMps(type: Copy) {
+    dependsOn configurations.mps
+    from {
+        configurations.mps.resolve().collect { zipTree(it) }
+    }
+    into mpsDir
+
+ /* TODO: Check if this is better then the compile solution
+   doLast {
+        sourceSets.main.compileClasspath += fileTree(mpsDir.getAbsolutePath() + "/lib")
+     }*/
+}
+//compileJava.dependsOn resolveMps
+
+
+//gradle schaut automatisch nach ob diese artefakte mit groupId:artifactId:version
+//existieren und packt alle darin enthaltenen patsh auf den claspath
+dependencies {
+    mps "com.jetbrains:mps:$mpsVersion"
+    compile fileTree(tasks.resolveMps.destinationDir.getAbsolutePath() + "/lib"){
+     builtBy tasks.resolveMps
+     include "**/*.jar"
+    }
+}
+
+//definiert alle repos unter verwendung der liste von zeile 10
+repositories {
+    //check for published artifacts in maven local
+    mavenLocal()
+    for (repoUrl in project.dependencyRepositories) {
+        maven {
+            url repoUrl
+        }
+    }
+}
+
+//##################GLOBAL VARS########################
+ext.mps_artifact = resolveMps.destinationDir.getAbsolutePath()
+ext.mps_home = '-Dmps.home=' + mps_artifact
+//#####################################################
+
+
+task setup(){
+    dependsOn resolveMps 
+    dependsOn assemble
+}
+//TODO: clean + resolve + build should run first
+
+task runCommandLineTool(type: JavaExec, dependsOn: [setup]) { 
+    description "Will build the command line tool, create the *.jars and put them on the classpath. Afterwards the main function of CommandLineProjectBuild will be executed"
+    main = 'CommandLineProjectBuild' 
+    classpath fileTree(dir: "$mps_artifact/lib", include: "*.jar") // $mps_home points to the MPS installation
+    classpath file('build/classes/java/main') // Location of CommandLineProjectBuild.class
+}
+
+rootProject.defaultTasks 'runCommandLineTool'
